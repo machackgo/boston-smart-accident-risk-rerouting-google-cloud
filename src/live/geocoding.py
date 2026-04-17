@@ -38,7 +38,7 @@ def geocode(address: str) -> dict:
         }
 
     Raises:
-        EnvironmentError: If GOOGLE_SERVER_API_KEY is not set in .env.
+        google.api_core.exceptions.NotFound: If google-server-api-key is missing from Secret Manager.
         requests.ConnectionError: On network errors reaching Google.
         requests.HTTPError: On non-200 HTTP responses from Google.
         ValueError: If Google returns ZERO_RESULTS or a non-OK status.
@@ -120,7 +120,7 @@ def reverse_geocode(lat: float, lng: float) -> dict:
         }
 
     Raises:
-        EnvironmentError: If GOOGLE_MAPS_API_KEY is not set.
+        google.api_core.exceptions.NotFound: If google-maps-api-key is missing from Secret Manager.
         requests.ConnectionError: On network errors.
         requests.HTTPError: On non-200 HTTP responses.
         ValueError: If Google returns ZERO_RESULTS.

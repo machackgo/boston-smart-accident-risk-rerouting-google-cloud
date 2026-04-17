@@ -49,7 +49,7 @@ def get_weather(lat: float, lng: float) -> dict:
         }
 
     Raises:
-        EnvironmentError: If OPENWEATHER_API_KEY is not set in .env.
+        google.api_core.exceptions.NotFound: If openweather-api-key is missing from Secret Manager.
         requests.ConnectionError: On network errors reaching OpenWeather.
         requests.HTTPError: On non-200 responses from OpenWeather.
         KeyError: If expected fields are missing in the response.

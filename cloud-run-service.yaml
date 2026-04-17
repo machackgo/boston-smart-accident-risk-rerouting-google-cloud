@@ -1,22 +1,21 @@
-# Declarative Cloud Run service definition.
+# Declarative Cloud Run service definition — Google Cloud deployment.
 #
-# Fill in before use:
-#   YOUR_PROJECT_ID  — your GCP project ID (e.g. my-project-123456)
-#   YOUR_REGION      — same region as cloudbuild.yaml (e.g. us-central1)
-#   boston-risk      — your Artifact Registry repo name
+# Project:  boston-rerouting
+# Region:   us-central1
+# Image:    Artifact Registry → boston-risk repo
 #
-# Deploy with:
-#   gcloud run services replace cloud-run-service.yaml --region=YOUR_REGION
+# Secrets (google-maps-api-key, google-server-api-key, openweather-api-key) are
+# fetched at runtime by the app via the Secret Manager SDK (src/secrets.py).
+# No env-var injection is used.
 #
-# Secrets must be created first (one-time, run from your terminal):
-#   echo -n "YOUR_KEY" | gcloud secrets create google-maps-api-key   --data-file=-
-#   echo -n "YOUR_KEY" | gcloud secrets create google-server-api-key --data-file=-
-#   echo -n "YOUR_KEY" | gcloud secrets create openweather-api-key   --data-file=-
+# One-time prerequisites (already done for this project):
+#   - Artifact Registry repo "boston-risk" created in us-central1
+#   - Three secrets created in Secret Manager
+#   - Service account 294613088058-compute@developer.gserviceaccount.com
+#     granted roles/secretmanager.secretAccessor on all three secrets
 #
-# Then grant the Cloud Run service account access:
-#   gcloud secrets add-iam-policy-binding google-maps-api-key \
-#     --member=serviceAccount:SERVICE_ACCOUNT_EMAIL --role=roles/secretmanager.secretAccessor
-#   (repeat for the other two secrets)
+# Deploy:
+#   gcloud run services replace cloud-run-service.yaml --region=us-central1
 
 apiVersion: serving.knative.dev/v1
 kind: Service

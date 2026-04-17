@@ -2,7 +2,6 @@ google-cloud-secret-manager
 fastapi
 uvicorn
 supabase
-python-dotenv
 requests
 polyline
 pandas

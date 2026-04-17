@@ -164,7 +164,7 @@ def get_route(origin, destination, departure_time=None):
         }
 
     Raises:
-        EnvironmentError: If GOOGLE_MAPS_API_KEY is not set in .env.
+        google.api_core.exceptions.NotFound: If google-server-api-key is missing from Secret Manager.
         requests.HTTPError: On non-200 responses from Google.
         ValueError: If the API returns no routes.
     """

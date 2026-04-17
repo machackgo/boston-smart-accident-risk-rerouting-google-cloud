@@ -125,7 +125,7 @@ def predict_route_risk(origin: str, destination: str, departure_time=None) -> di
         }
 
     Raises:
-        EnvironmentError: If a required API key is missing from .env.
+        google.api_core.exceptions.NotFound: If a required secret is missing from Secret Manager.
         requests.ConnectionError: On network failures to any live API.
         requests.HTTPError: On non-200 responses from any live API.
         ValueError: If the route returns no polyline or the destination is unreachable.

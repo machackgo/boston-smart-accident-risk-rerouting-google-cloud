@@ -1,94 +1,112 @@
-# Boston Smart Accident Risk and Rerouting System
+# Boston Smart Accident Risk and Rerouting — Google Cloud
 
-Team project for Intro to Data Science.
+Uses historical Boston crash data (MassDOT 2015–2024), live weather, and live Google Maps traffic to estimate accident risk on a driving route and recommend safer alternatives. Deployed on Google Cloud Platform.
 
-## Team Members
-- Mohammed Mubashir Uddin Faraz
-- Sandhia Maheshwari
-- Himabindu Tummala
-- Kamal Dalal
+**Team:** Mohammed Mubashir Uddin Faraz, Sandhia Maheshwari, Himabindu Tummala, Kamal Dalal
 
-## Project Idea
-This project uses historical Boston accident data, live weather, live traffic conditions, and route information to estimate accident/disruption risk and recommend alternate routes.
+---
 
-## Dataset API
+## Live Service
 
-We uploaded the full Boston crash dataset (47,000+ rows, 2015–2024) from MassDOT to a live REST API — no CSV download needed. The API is built with **FastAPI**, hosted on **Render**, and backed by **Supabase** as the database.
+**Base URL:** `https://boston-accident-risk-api-qzr2qvsfqa-uc.a.run.app`
 
-**Live API base URL:** https://boston-smart-accident-risk-rerouting.onrender.com
+**API docs (Swagger):** `https://boston-accident-risk-api-qzr2qvsfqa-uc.a.run.app/docs`
 
-**Swagger docs (browser):** https://boston-smart-accident-risk-rerouting.onrender.com/docs
+---
 
-> **Note:** The first request may take **30–60 seconds** due to Render's free tier cold start. Subsequent requests will be fast.
+## Google Cloud Architecture
 
-### Available Endpoints
-
-| Endpoint | Description |
+| Component | Purpose |
 |---|---|
-| `GET /crashes` | All crashes (paginated) |
-| `GET /crashes/year/{year}` | Filter by year (2015–2024) |
-| `GET /crashes/city/{city}` | Filter by city/town name |
-| `GET /crashes/severity/{severity}` | Filter by severity class |
-| `GET /crashes/fatal` | Crashes with at least 1 fatality |
-| `GET /crashes/hotspots` | EMS-flagged crash hotspot locations |
-| `GET /crashes/filter` | Multi-field filter (year, city, severity, weather) |
-| `GET /stats/by-year` | Aggregated crash counts and injuries per year |
+| **Cloud Run** | Hosts the FastAPI service (`boston-accident-risk-api`) |
+| **Artifact Registry** | Stores the Docker container image (`boston-risk` repo) |
+| **Cloud Build** | Builds and pushes the image on each deploy |
+| **Secret Manager** | Stores API keys; fetched at runtime by the app via the Python SDK |
 
-### Response Shape
+Secrets are never injected as environment variables. The app fetches them directly from Secret Manager using `src/secrets.py`, which caches each value in memory after the first fetch.
 
-All endpoints return a JSON object like:
+---
+
+## API Endpoints
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/` | GET | Frontend map interface |
+| `/predict` | POST | Predict accident risk for a route |
+| `/predict/segmented` | POST | Per-segment risk along a route |
+| `/predict/example` | GET | Hardcoded example response (no API calls) |
+| `/crashes` | GET | All crashes, paginated |
+| `/crashes/year/{year}` | GET | Filter by year (2015–2024) |
+| `/crashes/city/{city}` | GET | Filter by city/town |
+| `/crashes/severity/{severity}` | GET | Filter by severity class |
+| `/crashes/fatal` | GET | Crashes with at least 1 fatality |
+| `/crashes/hotspots` | GET | EMS-flagged hotspot locations |
+| `/crashes/filter` | GET | Multi-field filter (year, city, severity, weather) |
+| `/stats/by-year` | GET | Crash counts and injuries grouped by year |
+
+### Predict request body
 
 ```json
 {
-  "total_returned": 2,
-  "data": [ { ...crash fields... }, { ...crash fields... } ]
+  "origin": "Fenway Park, Boston, MA",
+  "destination": "Boston Logan International Airport, MA",
+  "departure_time": "2024-10-15T08:00:00Z"
 }
 ```
 
-Access the records via `response.json()["data"]`.
+`departure_time` is optional — defaults to now.
 
 ---
 
-## Quick Start
+## Deploying
 
-### Prerequisites
+### Build and push a new image
 
 ```bash
-pip install requests pandas
+gcloud builds submit \
+  --project=boston-rerouting \
+  --tag=us-central1-docker.pkg.dev/boston-rerouting/boston-risk/boston-accident-risk-api:latest \
+  .
 ```
 
-### Python Example
+### Deploy to Cloud Run
 
-```python
-import requests
-import pandas as pd
-
-BASE = "https://boston-smart-accident-risk-rerouting.onrender.com/"
-# Note: first request may take 30-60 seconds (Render free tier cold start)
-
-# --- Fatal crashes ---
-response = requests.get(f"{BASE}/crashes/fatal", params={"limit": 50})
-response.raise_for_status()
-fatal_df = pd.DataFrame(response.json()["data"])
-print(f"Fatal crashes returned: {len(fatal_df)}")
-print(fatal_df[["year", "city_town_name", "crash_severity_descr", "weath_cond_descr"]].head())
-
-# --- Crashes in 2020 with rain ---
-response = requests.get(f"{BASE}/crashes/filter", params={
-    "year": 2020,
-    "weather": "Rain",
-    "limit": 100
-})
-response.raise_for_status()
-rain_df = pd.DataFrame(response.json()["data"])
-print(f"\nRainy crashes in 2020 returned: {len(rain_df)}")
-print(rain_df[["year", "city_town_name", "weath_cond_descr", "crash_severity_descr"]].head())
+```bash
+gcloud run services replace cloud-run-service.yaml --region=us-central1
 ```
-
-A runnable version of this code is in [`examples/quickstart.py`](examples/quickstart.py).
-
-For browser-based exploration, open the [Swagger docs](https://boston-smart-accident-risk-rerouting.onrender.com/docs).
 
 ---
 
-No CSV download required — query only what you need, directly into a DataFrame.
+## Local Development
+
+```bash
+pip install -r requirements.txt
+```
+
+The app fetches secrets from Google Secret Manager at runtime. For local development, authenticate with Application Default Credentials:
+
+```bash
+gcloud auth application-default login
+```
+
+Then run:
+
+```bash
+uvicorn api:app --reload
+```
+
+The app will be available at `http://localhost:8000`.
+
+---
+
+## Secrets
+
+Three secrets must exist in Google Secret Manager under project `boston-rerouting`:
+
+| Secret name | Used for |
+|---|---|
+| `google-maps-api-key` | Frontend map + reverse geocoding |
+| `google-server-api-key` | Routes API + forward geocoding |
+| `openweather-api-key` | Live weather conditions |
+
+The Cloud Run service account (`294613088058-compute@developer.gserviceaccount.com`) must have `roles/secretmanager.secretAccessor` on all three.
