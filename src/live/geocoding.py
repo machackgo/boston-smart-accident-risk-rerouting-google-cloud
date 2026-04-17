@@ -14,14 +14,8 @@ Usage example:
     print(result["location_type"])     # "GEOMETRIC_CENTER"
 """
 
-import os
 import requests
-from pathlib import Path
-from dotenv import load_dotenv
-
-# Load .env from repo root (two levels up from this file: src/live/geocoding.py)
-_ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
-load_dotenv(dotenv_path=_ENV_PATH)
+from src.secrets import get_secret
 
 GEOCODING_API_URL = "https://maps.googleapis.com/maps/api/geocode/json"
 
@@ -59,12 +53,7 @@ def geocode(address: str) -> dict:
         from src.live.weather import get_weather
         weather = get_weather(lat=result["lat"], lng=result["lng"])
     """
-    api_key = os.environ.get("GOOGLE_SERVER_API_KEY")
-    if not api_key:
-        raise EnvironmentError(
-            "GOOGLE_MAPS_API_KEY not found. "
-            f"Make sure it is set in {_ENV_PATH}"
-        )
+    api_key = get_secret("google-server-api-key")
 
     params = {
         "address": address,
@@ -136,12 +125,7 @@ def reverse_geocode(lat: float, lng: float) -> dict:
         requests.HTTPError: On non-200 HTTP responses.
         ValueError: If Google returns ZERO_RESULTS.
     """
-    api_key = os.environ.get("GOOGLE_MAPS_API_KEY")
-    if not api_key:
-        raise EnvironmentError(
-            "GOOGLE_MAPS_API_KEY not found. "
-            f"Make sure it is set in {_ENV_PATH}"
-        )
+    api_key = get_secret("google-maps-api-key")
 
     params = {
         "latlng": f"{lat},{lng}",

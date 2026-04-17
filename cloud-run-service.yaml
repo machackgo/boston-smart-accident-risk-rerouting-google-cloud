@@ -39,7 +39,7 @@ spec:
       # Generous timeout — BallTree + LightGBM load takes ~15s on cold start
       timeoutSeconds: 300
       containers:
-        - image: YOUR_REGION-docker.pkg.dev/YOUR_PROJECT_ID/boston-risk/boston-accident-risk-api:latest
+        - image: us-central1-docker.pkg.dev/boston-rerouting/boston-risk/boston-accident-risk-api:latest
           ports:
             - containerPort: 8080
           resources:
@@ -47,24 +47,6 @@ spec:
               cpu: "1"
               # 2 Gi covers: LightGBM model + spatial parquet BallTree + pandas + request headroom
               memory: 2Gi
-          env:
-            # Secrets are injected as env vars — zero code changes needed.
-            # The app already reads these via os.environ.get().
-            - name: GOOGLE_MAPS_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: google-maps-api-key
-                  key: latest
-            - name: GOOGLE_SERVER_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: google-server-api-key
-                  key: latest
-            - name: OPENWEATHER_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: openweather-api-key
-                  key: latest
   traffic:
     - percent: 100
       latestRevision: true

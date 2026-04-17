@@ -15,14 +15,8 @@ Usage example:
     print(result["is_low_visibility"])  # True if visibility < 5000 meters
 """
 
-import os
 import requests
-from pathlib import Path
-from dotenv import load_dotenv
-
-# Load .env from repo root (two levels up from this file: src/live/weather.py)
-_ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
-load_dotenv(dotenv_path=_ENV_PATH)
+from src.secrets import get_secret
 
 WEATHER_API_URL = "https://api.openweathermap.org/data/2.5/weather"
 
@@ -68,12 +62,7 @@ def get_weather(lat: float, lng: float) -> dict:
         if weather["is_low_visibility"]:
             print(f"Low visibility: {weather['visibility_meters']}m")
     """
-    api_key = os.environ.get("OPENWEATHER_API_KEY")
-    if not api_key:
-        raise EnvironmentError(
-            "OPENWEATHER_API_KEY not found. "
-            f"Make sure it is set in {_ENV_PATH}"
-        )
+    api_key = get_secret("openweather-api-key")
 
     params = {
         "lat": lat,

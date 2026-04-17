@@ -21,15 +21,9 @@ Usage example:
     )
 """
 
-import os
 import requests
 import polyline as polyline_lib
-from pathlib import Path
-from dotenv import load_dotenv
-
-# Load .env from repo root (two levels up from this file: src/live/routes.py)
-_ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
-load_dotenv(dotenv_path=_ENV_PATH)
+from src.secrets import get_secret
 
 ROUTES_API_URL = "https://routes.googleapis.com/directions/v2:computeRoutes"
 FIELD_MASK = (
@@ -174,12 +168,7 @@ def get_route(origin, destination, departure_time=None):
         requests.HTTPError: On non-200 responses from Google.
         ValueError: If the API returns no routes.
     """
-    api_key = os.environ.get("GOOGLE_SERVER_API_KEY")
-    if not api_key:
-        raise EnvironmentError(
-            "GOOGLE_MAPS_API_KEY not found. "
-            f"Make sure it is set in {_ENV_PATH}"
-        )
+    api_key = get_secret("google-server-api-key")
 
     headers = {
         "Content-Type": "application/json",

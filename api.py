@@ -5,7 +5,6 @@ Docs: http://localhost:8000/docs
 """
 
 import sys
-import os
 from pathlib import Path
 
 # Ensure repo root is on sys.path so src.predict.predictor is importable
@@ -24,6 +23,7 @@ from typing import Optional
 
 from src.predict.predictor import predict_route_risk, predict_route_risk_segmented
 from src.live.routes import get_route
+from src.secrets import get_secret
 
 # Minimum route thresholds — below these the model's training distribution is not met
 _MIN_DISTANCE_MILES = 0.3
@@ -94,7 +94,7 @@ _STATIC_DIR = _REPO_ROOT / "static"
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 def serve_frontend():
     """Serve the single-page frontend app with the Google Maps API key injected."""
-    api_key = os.environ.get("GOOGLE_MAPS_API_KEY", "")
+    api_key = get_secret("google-maps-api-key")
     html = (_STATIC_DIR / "index.html").read_text()
     return html.replace("{{GOOGLE_MAPS_API_KEY}}", api_key)
 
