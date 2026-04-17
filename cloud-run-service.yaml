@@ -1,0 +1,70 @@
+# Declarative Cloud Run service definition.
+#
+# Fill in before use:
+#   YOUR_PROJECT_ID  — your GCP project ID (e.g. my-project-123456)
+#   YOUR_REGION      — same region as cloudbuild.yaml (e.g. us-central1)
+#   boston-risk      — your Artifact Registry repo name
+#
+# Deploy with:
+#   gcloud run services replace cloud-run-service.yaml --region=YOUR_REGION
+#
+# Secrets must be created first (one-time, run from your terminal):
+#   echo -n "YOUR_KEY" | gcloud secrets create google-maps-api-key   --data-file=-
+#   echo -n "YOUR_KEY" | gcloud secrets create google-server-api-key --data-file=-
+#   echo -n "YOUR_KEY" | gcloud secrets create openweather-api-key   --data-file=-
+#
+# Then grant the Cloud Run service account access:
+#   gcloud secrets add-iam-policy-binding google-maps-api-key \
+#     --member=serviceAccount:SERVICE_ACCOUNT_EMAIL --role=roles/secretmanager.secretAccessor
+#   (repeat for the other two secrets)
+
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: boston-accident-risk-api
+  annotations:
+    run.googleapis.com/ingress: all
+spec:
+  template:
+    metadata:
+      annotations:
+        # gen2 execution environment — better cold-start and memory performance
+        run.googleapis.com/execution-environment: gen2
+        # Scale to 0 when idle (cost-free). Raise minScale to "1" to eliminate cold starts.
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "3"
+    spec:
+      # Allow up to 60 concurrent requests per instance (model is thread-safe after load)
+      containerConcurrency: 60
+      # Generous timeout — BallTree + LightGBM load takes ~15s on cold start
+      timeoutSeconds: 300
+      containers:
+        - image: YOUR_REGION-docker.pkg.dev/YOUR_PROJECT_ID/boston-risk/boston-accident-risk-api:latest
+          ports:
+            - containerPort: 8080
+          resources:
+            limits:
+              cpu: "1"
+              # 2 Gi covers: LightGBM model + spatial parquet BallTree + pandas + request headroom
+              memory: 2Gi
+          env:
+            # Secrets are injected as env vars — zero code changes needed.
+            # The app already reads these via os.environ.get().
+            - name: GOOGLE_MAPS_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: google-maps-api-key
+                  key: latest
+            - name: GOOGLE_SERVER_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: google-server-api-key
+                  key: latest
+            - name: OPENWEATHER_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: openweather-api-key
+                  key: latest
+  traffic:
+    - percent: 100
+      latestRevision: true

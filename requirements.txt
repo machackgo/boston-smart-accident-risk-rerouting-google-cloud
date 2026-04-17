@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+supabase
+python-dotenv
+requests
+polyline
+pandas
+numpy
+scikit-learn
+joblib
+lightgbm
+matplotlib
+tzdata
+imbalanced-learn

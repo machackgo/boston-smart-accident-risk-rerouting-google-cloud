@@ -1,0 +1,32 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+.env
+.git
+.gitignore
+.gitattributes
+.vscode
+.idea
+
+# Training-only artifacts — not needed at runtime
+massdot_boston_2015_2024_enriched.csv
+data/crashes_with_spatial_v4.parquet
+src/model/
+reports/
+notebooks/
+docs/
+examples/
+tests/
+
+# Old model versions — only v4 is used at runtime
+models/best_model.pkl
+models/best_model_v2.pkl
+models/best_model_v3.pkl
+models/feature_list.txt
+models/feature_list_v2.txt
+models/feature_list_v3.txt
+models/MODEL_CARD_v2.md
+models/MODEL_CARD_v3.md
+models/model_comparison*.csv

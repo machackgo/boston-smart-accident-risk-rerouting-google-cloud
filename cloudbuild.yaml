@@ -1,0 +1,55 @@
+# Cloud Build CI/CD pipeline
+#
+# Fill in before use:
+#   _REGION       — e.g. us-central1
+#   _REPO         — Artifact Registry repo name you create (e.g. boston-risk)
+#   _SERVICE      — Cloud Run service name (e.g. boston-accident-risk-api)
+#
+# One-time setup commands (run once from your terminal):
+#   gcloud artifacts repositories create $_REPO \
+#     --repository-format=docker --location=$_REGION
+#   gcloud run services replace cloud-run-service.yaml --region=$_REGION
+#
+# Then connect this repo to a Cloud Build trigger in the GCP Console
+# (Source Repositories or GitHub mirror) pointing at this file.
+
+substitutions:
+  _REGION: us-central1
+  _REPO: boston-risk
+  _SERVICE: boston-accident-risk-api
+
+steps:
+  # 1 — Build the Docker image
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$COMMIT_SHA
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:latest
+      - .
+
+  # 2 — Push both tags to Artifact Registry
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - --all-tags
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}
+
+  # 3 — Deploy to Cloud Run (traffic stays on old revision until this succeeds)
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE}
+      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$COMMIT_SHA
+      - --region=${_REGION}
+      - --platform=managed
+
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$COMMIT_SHA
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:latest
+
+options:
+  logging: CLOUD_LOGGING_ONLY
