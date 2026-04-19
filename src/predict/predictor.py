@@ -44,10 +44,11 @@ _MODEL_PATH = (
     _MODEL_PATH_V3 if _MODEL_PATH_V3.exists() else
     _MODEL_PATH_V2
 )
-_model_bundle = joblib.load(_MODEL_PATH)
-_MODEL   = _model_bundle["model"]
-_CLASSES = _model_bundle["classes"]   # ['High', 'Low', 'Medium']
-print(f"[predictor] Loaded model from {_MODEL_PATH.name}")
+_model_bundle  = joblib.load(_MODEL_PATH)
+_MODEL         = _model_bundle["model"]
+_CLASSES       = _model_bundle["classes"]   # ['High', 'Low', 'Medium']
+_MODEL_VERSION = _MODEL_PATH.stem.split("best_model_")[-1]   # "v4", "v3", or "v2"
+print(f"[predictor] Loaded model from {_MODEL_PATH.name} (version={_MODEL_VERSION})")
 
 # ── Per-class thresholds (v4 only; default 0.5 for earlier models) ────────────
 _THRESHOLDS_PATH = _REPO_ROOT / "models" / "thresholds_v4.json"
@@ -164,10 +165,12 @@ def predict_route_risk(origin: str, destination: str, departure_time=None) -> di
             "is_low_visibility":  weather_raw["is_low_visibility"],
         },
         "context": {
-            "midpoint_lat":         context["midpoint_lat"],
-            "midpoint_lng":         context["midpoint_lng"],
-            "hour_of_day":          context["hour_of_day"],
-            "weather_mapping_used": context["weather_mapping_used"],
+            "midpoint_lat":            context["midpoint_lat"],
+            "midpoint_lng":            context["midpoint_lng"],
+            "hour_of_day":             context["hour_of_day"],
+            "weather_mapping_used":    context["weather_mapping_used"],
+            "model_version":           _MODEL_VERSION,
+            "spatial_features_active": context.get("spatial_features_active", False),
         },
     }
 
@@ -448,9 +451,10 @@ def predict_route_risk_segmented(
             "num_routes_analyzed":   len(route_results),
             "num_segments_per_route": num_segments,
             "weather_mapping_used":  feat_ctx["weather_mapping_used"],
-            "speed_source":          feat_ctx.get("speed_source", "unknown"),
-            "fallback_speed_mph":    feat_ctx.get("fallback_speed_mph"),
-            "model_version":         feat_ctx.get("model_version", "unknown"),
+            "speed_source":            feat_ctx.get("speed_source", "unknown"),
+            "fallback_speed_mph":      feat_ctx.get("fallback_speed_mph"),
+            "model_version":           _MODEL_VERSION,
+            "spatial_features_active": feat_ctx.get("spatial_features_active", False),
         },
         "recommendation_reason": reason,
     }

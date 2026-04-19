@@ -120,12 +120,12 @@ def reverse_geocode(lat: float, lng: float) -> dict:
         }
 
     Raises:
-        google.api_core.exceptions.NotFound: If google-maps-api-key is missing from Secret Manager.
+        google.api_core.exceptions.NotFound: If google-server-api-key is missing from Secret Manager.
         requests.ConnectionError: On network errors.
         requests.HTTPError: On non-200 HTTP responses.
         ValueError: If Google returns ZERO_RESULTS.
     """
-    api_key = get_secret("google-maps-api-key")
+    api_key = get_secret("google-server-api-key")
 
     params = {
         "latlng": f"{lat},{lng}",

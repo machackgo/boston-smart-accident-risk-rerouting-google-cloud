@@ -46,6 +46,7 @@ with open(_FEAT_PATH) as _f:
     ACTIVE_FEATURES = [line.strip() for line in _f if line.strip()]
 
 _USING_V4 = _FEAT_PATH == _FEAT_V4
+_FEATURE_SCHEMA_VERSION = "v4" if _USING_V4 else "v2"  # fixed at import; never changes
 
 # ── Weather keep-cols (v4 pruned set; all allowed when on v2 fallback) ────────
 _WEATHER_KEEPCOLS_PATH = _REPO_ROOT / "models" / "weather_keep_cols_v4.json"
@@ -84,6 +85,7 @@ if _USING_V4:
         print(f"[feature_builder] WARNING: could not build spatial BallTree: {_e}")
         _USING_V4 = False
 
+_SPATIAL_ACTIVE = _SPATIAL_TREE is not None  # True only if BallTree loaded successfully
 
 _EARTH_R = 6_371_009.0  # metres
 
@@ -283,9 +285,10 @@ def build_segment_features(
         "time_features":        time_feats,
         "local_hour":           time_feats["hour_of_day"],
         "num_points":           len(sample_points),
-        "speed_source":         "per_segment" if speed_limits_per_point else "distance_heuristic",
-        "fallback_speed_mph":   fallback_spd,
-        "model_version":        "v4" if _USING_V4 else "v2/v3",
+        "speed_source":           "per_segment" if speed_limits_per_point else "distance_heuristic",
+        "fallback_speed_mph":     fallback_spd,
+        "model_version":          _FEATURE_SCHEMA_VERSION,
+        "spatial_features_active": _SPATIAL_ACTIVE,
     }
     return features_df, context
 
@@ -356,8 +359,9 @@ def build_features(origin: str, destination: str, departure_time=None) -> tuple:
         "weather_feature_set":    weather_col,
         "light_phase":      next(k for k, v in light_feats.items() if v == 1),
         "speed_limit_used": _smarter_speed_default(default_route["distance_miles"]),
-        "route_raw":        route,
-        "weather_raw":      weather,
-        "model_version":    "v4" if _USING_V4 else "v2/v3",
+        "route_raw":               route,
+        "weather_raw":             weather,
+        "model_version":           _FEATURE_SCHEMA_VERSION,
+        "spatial_features_active": _SPATIAL_ACTIVE,
     }
     return features_df, context

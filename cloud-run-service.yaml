@@ -10,9 +10,11 @@
 #
 # One-time prerequisites (already done for this project):
 #   - Artifact Registry repo "boston-risk" created in us-central1
-#   - Three secrets created in Secret Manager
+#   - Three API secrets + cloudsql-postgres-password created in Secret Manager
 #   - Service account 294613088058-compute@developer.gserviceaccount.com
-#     granted roles/secretmanager.secretAccessor on all three secrets
+#     granted roles/secretmanager.secretAccessor on all four secrets
+#     and roles/cloudsql.client on the project
+#   - Cloud SQL instance: boston-rerouting:us-central1:boston-risk-postgres
 #
 # Deploy:
 #   gcloud run services replace cloud-run-service.yaml --region=us-central1
@@ -32,6 +34,8 @@ spec:
         # Scale to 0 when idle (cost-free). Raise minScale to "1" to eliminate cold starts.
         autoscaling.knative.dev/minScale: "0"
         autoscaling.knative.dev/maxScale: "3"
+        # Authorise TCP connections to Cloud SQL and pre-validate IAM permissions.
+        run.googleapis.com/cloudsql-instances: boston-rerouting:us-central1:boston-risk-postgres
     spec:
       # Allow up to 60 concurrent requests per instance (model is thread-safe after load)
       containerConcurrency: 60
