@@ -494,7 +494,7 @@
         <div class="flex items-start justify-between gap-2 mb-2">
           <div>
             <p class="text-xs font-bold text-gray-800">${r.label}</p>
-            <p class="text-[11px] text-gray-400">${r.duration_minutes} min · ${r.distance_miles} mi</p>
+            <p class="text-[11px] text-gray-400">${fmtDuration(r.duration_minutes)} · ${r.distance_miles} mi</p>
           </div>
           <span class="flex-none text-[11px] font-bold px-2 py-0.5 rounded-full text-white"
                 style="background:${cfg.color}">${r.overall_risk_class}</span>
@@ -578,7 +578,7 @@
 
     // Route details
     document.getElementById('route-grid').innerHTML = `
-      ${card('🕐', 'Duration',      routeObj.duration_minutes + ' min')}
+      ${card('🕐', 'Duration',      fmtDuration(routeObj.duration_minutes))}
       ${card('📍', 'Distance',      routeObj.distance_miles + ' mi')}
       ${card('⚠️', 'Hotspots',       routeObj.num_hotspots)}
       ${card('🔴', 'High-risk segs', routeObj.num_high_hotspots || 0)}`;
@@ -622,6 +622,15 @@
     buildComparePanel(data);
     updateResultsPanel(activeRoute, data);
     drawRoute(activeRoute, data.routes);
+  }
+
+  // ── Duration formatter ─────────────────────────────────────────
+  function fmtDuration(mins) {
+    const total = Math.round(mins);
+    if (total < 60) return total + ' min';
+    const h = Math.floor(total / 60);
+    const m = total % 60;
+    return m === 0 ? h + ' hr' : h + ' hr ' + m + ' min';
   }
 
   // ── Template helpers ───────────────────────────────────────────
