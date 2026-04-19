@@ -1,10 +1,12 @@
 google-cloud-secret-manager
+cloud-sql-python-connector[pg8000]
+sqlalchemy
 fastapi
 uvicorn
-supabase
 requests
 polyline
 pandas
+pyarrow
 numpy
 scikit-learn
 joblib

@@ -5,6 +5,8 @@ Docs: http://localhost:8000/docs
 """
 
 import sys
+import time
+import sqlalchemy
 from pathlib import Path
 
 # Ensure repo root is on sys.path so src.predict.predictor is importable
@@ -13,17 +15,17 @@ _REPO_ROOT = Path(__file__).resolve().parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from fastapi import FastAPI, Query, HTTPException
+from fastapi import FastAPI, Query, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from supabase import create_client
 from typing import Optional
 
 from src.predict.predictor import predict_route_risk, predict_route_risk_segmented
 from src.live.routes import get_route
 from src.secrets import get_secret
+from src.database import log_prediction, get_engine
 
 # Minimum route thresholds — below these the model's training distribution is not met
 _MIN_DISTANCE_MILES = 0.3
@@ -58,11 +60,6 @@ def _check_route_size(origin: str, destination: str):
         )
     return None
 
-# ── Credentials ──────────────────────────────────────────────
-SUPABASE_URL = "https://iizfaawqzzrnhfaihimp.supabase.co"
-SUPABASE_KEY = "sb_publishable_EnEsuHwXoNl4bQLeM2221A_LBW4nnNO"  # publishable key for reading
-
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 app = FastAPI(title="Boston Smart Accident Risk Rerouting API", version="2.0")
 
 # ── CORS ──────────────────────────────────────────────────────
@@ -90,6 +87,12 @@ class SegmentedPredictRequest(BaseModel):
 TABLE = "boston_crashes"
 _STATIC_DIR = _REPO_ROOT / "static"
 
+
+def _rows(result) -> list[dict]:
+    """Convert a SQLAlchemy result into a list of plain dicts for JSON serialisation."""
+    return [dict(r) for r in result.mappings().all()]
+
+
 # ── 0. Frontend ───────────────────────────────────────────────
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 def serve_frontend():
@@ -102,60 +105,103 @@ def serve_frontend():
 @app.get("/crashes")
 def get_crashes(limit: int = 100, offset: int = 0):
     """Get crashes with pagination. Default 100 per page."""
-    res = supabase.table(TABLE).select("*").range(offset, offset + limit - 1).execute()
-    return {"total_returned": len(res.data), "data": res.data}
+    with get_engine().connect() as conn:
+        data = _rows(conn.execute(
+            sqlalchemy.text(
+                "SELECT * FROM boston_crashes ORDER BY id LIMIT :limit OFFSET :offset"
+            ),
+            {"limit": limit, "offset": offset},
+        ))
+    return {"total_returned": len(data), "data": data}
 
 # ── 2. Filter by year ─────────────────────────────────────────
 @app.get("/crashes/year/{year}")
 def get_by_year(year: int, limit: int = 100):
     """Get crashes for a specific year (2015–2024)."""
-    res = supabase.table(TABLE).select("*").eq("year", year).limit(limit).execute()
-    return {"year": year, "total_returned": len(res.data), "data": res.data}
+    with get_engine().connect() as conn:
+        data = _rows(conn.execute(
+            sqlalchemy.text(
+                "SELECT * FROM boston_crashes WHERE year = :year LIMIT :limit"
+            ),
+            {"year": year, "limit": limit},
+        ))
+    return {"year": year, "total_returned": len(data), "data": data}
 
 # ── 3. Filter by severity ─────────────────────────────────────
 @app.get("/crashes/severity/{severity}")
 def get_by_severity(severity: str, limit: int = 100):
     """
-    Severity options: Fatal, Non-fatal injury, Property damage only
+    Severity options: Fatal, Injury, No Injury, Unknown
     Use SEVERITY_3CLASS values.
     """
-    res = supabase.table(TABLE).select("*").ilike("severity_3class", f"%{severity}%").limit(limit).execute()
-    return {"severity": severity, "total_returned": len(res.data), "data": res.data}
+    with get_engine().connect() as conn:
+        data = _rows(conn.execute(
+            sqlalchemy.text(
+                "SELECT * FROM boston_crashes WHERE severity_3class ILIKE :pat LIMIT :limit"
+            ),
+            {"pat": f"%{severity}%", "limit": limit},
+        ))
+    return {"severity": severity, "total_returned": len(data), "data": data}
 
 # ── 4. Filter by city ─────────────────────────────────────────
 @app.get("/crashes/city/{city}")
 def get_by_city(city: str, limit: int = 100):
     """Get crashes in a specific city/town."""
-    res = supabase.table(TABLE).select("*").ilike("city_town_name", f"%{city}%").limit(limit).execute()
-    return {"city": city, "total_returned": len(res.data), "data": res.data}
+    with get_engine().connect() as conn:
+        data = _rows(conn.execute(
+            sqlalchemy.text(
+                "SELECT * FROM boston_crashes WHERE city_town_name ILIKE :pat LIMIT :limit"
+            ),
+            {"pat": f"%{city}%", "limit": limit},
+        ))
+    return {"city": city, "total_returned": len(data), "data": data}
 
 # ── 5. Get hotspots ───────────────────────────────────────────
 @app.get("/crashes/hotspots")
 def get_hotspots(limit: int = 100):
     """Get crash hotspot locations (ems_hotspot_flag = 1)."""
-    res = supabase.table(TABLE).select("*").eq("ems_hotspot_flag", 1).limit(limit).execute()
-    return {"total_returned": len(res.data), "data": res.data}
+    with get_engine().connect() as conn:
+        data = _rows(conn.execute(
+            sqlalchemy.text(
+                "SELECT * FROM boston_crashes WHERE ems_hotspot_flag = 1 LIMIT :limit"
+            ),
+            {"limit": limit},
+        ))
+    return {"total_returned": len(data), "data": data}
 
 # ── 6. Fatal crashes only ─────────────────────────────────────
 @app.get("/crashes/fatal")
 def get_fatal(limit: int = 100):
     """Get crashes with at least 1 fatality."""
-    res = supabase.table(TABLE).select("*").gt("numb_fatal_injr", 0).limit(limit).execute()
-    return {"total_returned": len(res.data), "data": res.data}
+    with get_engine().connect() as conn:
+        data = _rows(conn.execute(
+            sqlalchemy.text(
+                "SELECT * FROM boston_crashes WHERE numb_fatal_injr > 0 LIMIT :limit"
+            ),
+            {"limit": limit},
+        ))
+    return {"total_returned": len(data), "data": data}
 
 # ── 7. Summary stats by year ──────────────────────────────────
 @app.get("/stats/by-year")
 def stats_by_year():
     """Get crash counts grouped by year."""
-    res = supabase.table(TABLE).select("year, numb_fatal_injr, numb_nonfatal_injr").execute()
-    from collections import defaultdict
-    stats = defaultdict(lambda: {"crashes": 0, "fatalities": 0, "injuries": 0})
-    for row in res.data:
-        y = row["year"]
-        stats[y]["crashes"]    += 1
-        stats[y]["fatalities"] += (row["numb_fatal_injr"] or 0)
-        stats[y]["injuries"]   += (row["numb_nonfatal_injr"] or 0)
-    return {"data": dict(sorted(stats.items()))}
+    with get_engine().connect() as conn:
+        rows = conn.execute(sqlalchemy.text("""
+            SELECT
+                year,
+                COUNT(*)                          AS crashes,
+                COALESCE(SUM(numb_fatal_injr), 0) AS fatalities,
+                COALESCE(SUM(numb_nonfatal_injr), 0) AS injuries
+            FROM boston_crashes
+            GROUP BY year
+            ORDER BY year
+        """)).fetchall()
+    data = {
+        r[0]: {"crashes": r[1], "fatalities": r[2], "injuries": r[3]}
+        for r in rows
+    }
+    return {"data": data}
 
 # ── 8. Advanced filter ────────────────────────────────────────
 @app.get("/crashes/filter")
@@ -167,19 +213,33 @@ def filter_crashes(
     limit:    int = 100
 ):
     """Filter by multiple fields at once."""
-    q = supabase.table(TABLE).select("*")
-    if year:     q = q.eq("year", year)
-    if city:     q = q.ilike("city_town_name", f"%{city}%")
-    if severity: q = q.ilike("severity_3class", f"%{severity}%")
-    if weather:  q = q.ilike("weath_cond_descr", f"%{weather}%")
-    res = q.limit(limit).execute()
-    return {"filters_applied": {"year": year, "city": city, "severity": severity, "weather": weather},
-            "total_returned": len(res.data), "data": res.data}
+    conditions = ["1=1"]
+    params: dict = {"limit": limit}
+    if year:
+        conditions.append("year = :year")
+        params["year"] = year
+    if city:
+        conditions.append("city_town_name ILIKE :city")
+        params["city"] = f"%{city}%"
+    if severity:
+        conditions.append("severity_3class ILIKE :severity")
+        params["severity"] = f"%{severity}%"
+    if weather:
+        conditions.append("weath_cond_descr ILIKE :weather")
+        params["weather"] = f"%{weather}%"
+    sql = f"SELECT * FROM boston_crashes WHERE {' AND '.join(conditions)} LIMIT :limit"
+    with get_engine().connect() as conn:
+        data = _rows(conn.execute(sqlalchemy.text(sql), params))
+    return {
+        "filters_applied": {"year": year, "city": city, "severity": severity, "weather": weather},
+        "total_returned": len(data),
+        "data": data,
+    }
 
 
 # ── 9. Route risk prediction ──────────────────────────────────
 @app.post("/predict")
-def predict(request: PredictRequest):
+def predict(request: PredictRequest, background_tasks: BackgroundTasks):
     """
     Predict accident risk severity for a driving route.
 
@@ -206,20 +266,50 @@ def predict(request: PredictRequest):
     if guard is not None:
         return guard
 
+    t0 = time.monotonic()
     try:
         result = predict_route_risk(
             origin=request.origin,
             destination=request.destination,
             departure_time=request.departure_time,
         )
-        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+    elapsed_ms = int((time.monotonic() - t0) * 1000)
+    background_tasks.add_task(log_prediction, {
+        "endpoint":               "/predict",
+        "origin":                 request.origin,
+        "destination":            request.destination,
+        "departure_time":         request.departure_time,
+        "duration_minutes":       result["route"]["duration_minutes"],
+        "distance_miles":         result["route"]["distance_miles"],
+        "num_alternatives":       result["route"]["num_alternatives"],
+        "risk_class":             result["risk_class"],
+        "confidence":             result["confidence"],
+        "prob_low":               result["class_probabilities"]["Low"],
+        "prob_medium":            result["class_probabilities"]["Medium"],
+        "prob_high":              result["class_probabilities"]["High"],
+        "weather_condition":      result["weather"]["condition"],
+        "temperature_f":          result["weather"]["temperature_f"],
+        "is_precipitation":       result["weather"]["is_precipitation"],
+        "is_low_visibility":      result["weather"]["is_low_visibility"],
+        "midpoint_lat":           result["context"]["midpoint_lat"],
+        "midpoint_lng":           result["context"]["midpoint_lng"],
+        "hour_of_day":            result["context"]["hour_of_day"],
+        "recommended_route_index": None,
+        "safety_score":           None,
+        "num_hotspots":           None,
+        "num_high_hotspots":      None,
+        "model_version":          result["context"].get("model_version"),
+        "response_time_ms":       elapsed_ms,
+    })
+    return result
 
 
 # ── 10. Per-segment route risk prediction ─────────────────────
 @app.post("/predict/segmented")
-def predict_segmented(request: SegmentedPredictRequest):
+def predict_segmented(request: SegmentedPredictRequest, background_tasks: BackgroundTasks):
     """
     Predict accident risk at multiple points along a route.
 
@@ -246,6 +336,7 @@ def predict_segmented(request: SegmentedPredictRequest):
     if guard is not None:
         return guard
 
+    t0 = time.monotonic()
     try:
         result = predict_route_risk_segmented(
             origin=request.origin,
@@ -253,9 +344,41 @@ def predict_segmented(request: SegmentedPredictRequest):
             departure_time=request.departure_time,
             num_segments=request.num_segments,
         )
-        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+    elapsed_ms = int((time.monotonic() - t0) * 1000)
+    rec_idx   = result["recommended_route_index"]
+    rec_route = result["routes"][rec_idx]
+    def_route = result["routes"][result["default_route_index"]]
+    background_tasks.add_task(log_prediction, {
+        "endpoint":               "/predict/segmented",
+        "origin":                 request.origin,
+        "destination":            request.destination,
+        "departure_time":         request.departure_time,
+        "duration_minutes":       def_route["duration_minutes"],
+        "distance_miles":         def_route["distance_miles"],
+        "num_alternatives":       len(result["routes"]) - 1,
+        "risk_class":             rec_route["overall_risk_class"],
+        "confidence":             rec_route["overall_confidence"],
+        "prob_low":               rec_route["overall_probabilities"]["Low"],
+        "prob_medium":            rec_route["overall_probabilities"]["Medium"],
+        "prob_high":              rec_route["overall_probabilities"]["High"],
+        "weather_condition":      result["weather"]["condition"],
+        "temperature_f":          result["weather"]["temperature_f"],
+        "is_precipitation":       result["weather"]["is_precipitation"],
+        "is_low_visibility":      result["weather"]["is_low_visibility"],
+        "midpoint_lat":           None,
+        "midpoint_lng":           None,
+        "hour_of_day":            result["context"]["local_hour"],
+        "recommended_route_index": rec_idx,
+        "safety_score":           rec_route["safety_score"],
+        "num_hotspots":           rec_route["num_hotspots"],
+        "num_high_hotspots":      rec_route["num_high_hotspots"],
+        "model_version":          result["context"].get("model_version"),
+        "response_time_ms":       elapsed_ms,
+    })
+    return result
 
 
 # ── 11. Predict example (GET convenience endpoint) ────────────
