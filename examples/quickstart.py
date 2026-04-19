@@ -1,10 +1,10 @@
 """
 Boston Smart Accident Risk API - Quick Start Example
 =====================================================
-API Base URL: https://boston-smart-accident-risk-rerouting.onrender.com
-Swagger Docs: https://boston-smart-accident-risk-rerouting.onrender.com/docs
+API Base URL: https://boston-accident-risk-api-294613088058.us-central1.run.app
+Swagger Docs: https://boston-accident-risk-api-294613088058.us-central1.run.app/docs
 
-Note: The first request may take 30-60 seconds due to Render's free tier cold start.
+Note: The first request may take ~15 seconds on cold start (Cloud Run scales to zero when idle).
 
 Install dependencies:
     pip install requests pandas
@@ -13,7 +13,7 @@ Install dependencies:
 import requests
 import pandas as pd
 
-BASE = "https://boston-smart-accident-risk-rerouting.onrender.com"
+BASE = "https://boston-accident-risk-api-294613088058.us-central1.run.app"
 
 
 def fetch(endpoint, params=None):

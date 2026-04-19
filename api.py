@@ -5,17 +5,19 @@ Docs: http://localhost:8000/docs
 """
 
 import sys
+import io
 import time
 import sqlalchemy
+from datetime import datetime
 from pathlib import Path
 
 # Ensure repo root is on sys.path so src.predict.predictor is importable
-# (needed on Render where the working directory may not be on PYTHONPATH)
+# (needed when the working directory is not the repo root, e.g. Cloud Run)
 _REPO_ROOT = Path(__file__).resolve().parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from fastapi import FastAPI, Query, HTTPException, BackgroundTasks
+from fastapi import FastAPI, Query, HTTPException, BackgroundTasks, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -419,6 +421,59 @@ def predict_example():
         },
         "_note": "Hardcoded example. Call POST /predict for a live prediction.",
     }
+
+
+# ── 12. Weekly GCS export (called by Cloud Scheduler) ────────
+_EXPORT_TABLES  = ["route_predictions"]
+_GCS_BUCKET     = "boston-rerouting-data"
+
+@app.post("/admin/export", include_in_schema=False)
+def admin_export(authorization: Optional[str] = Header(None)):
+    """
+    Export both Cloud SQL tables to dated parquet files in GCS.
+    Protected by a bearer token stored in Secret Manager as 'export-admin-token'.
+    Intended to be called weekly by Cloud Scheduler.
+    """
+    expected = "Bearer " + get_secret("export-admin-token")
+    if authorization != expected:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    from google.cloud import storage as gcs
+    import pandas as pd
+
+    run_ts     = datetime.utcnow().strftime("%Y-%m-%d_%H-%M-%S")
+    gcs_client = gcs.Client()
+    engine     = get_engine()
+    results    = []
+
+    def _coerce(df):
+        """Convert object-dtype columns containing non-strings (e.g. UUID) to str."""
+        for col in df.select_dtypes("object").columns:
+            sample = df[col].dropna()
+            if len(sample) and not isinstance(sample.iloc[0], str):
+                df[col] = df[col].apply(lambda v: None if v is None else str(v))
+        return df
+
+    for table in _EXPORT_TABLES:
+        df       = _coerce(pd.read_sql(f"SELECT * FROM {table}", engine))
+        buf      = io.BytesIO()
+        df.to_parquet(buf, index=False, engine="pyarrow")
+        buf.seek(0)
+
+        blob_path = f"exports/{table}/{run_ts}.parquet"
+        blob      = gcs_client.bucket(_GCS_BUCKET).blob(blob_path)
+        blob.upload_from_file(buf, content_type="application/octet-stream")
+
+        gcs_uri = f"gs://{_GCS_BUCKET}/{blob_path}"
+        print(f"[export] {table}: {len(df):,} rows → {gcs_uri}")
+        results.append({
+            "table":     table,
+            "rows":      len(df),
+            "gcs_uri":   gcs_uri,
+            "timestamp": run_ts,
+        })
+
+    return {"status": "ok", "exports": results}
 
 
 # ── Static files (CSS/JS assets for future use) ───────────────

@@ -101,12 +101,14 @@ The app will be available at `http://localhost:8000`.
 
 ## Secrets
 
-Three secrets must exist in Google Secret Manager under project `boston-rerouting`:
+Five secrets must exist in Google Secret Manager under project `boston-rerouting`:
 
 | Secret name | Used for |
 |---|---|
-| `google-maps-api-key` | Frontend map + reverse geocoding |
-| `google-server-api-key` | Routes API + forward geocoding |
+| `google-maps-api-key` | Frontend map (browser key) |
+| `google-server-api-key` | Routes API + geocoding (server key) |
 | `openweather-api-key` | Live weather conditions |
+| `cloudsql-postgres-password` | Cloud SQL `postgres` user password |
+| `export-admin-token` | Bearer token for `POST /admin/export` |
 
-The Cloud Run service account (`294613088058-compute@developer.gserviceaccount.com`) must have `roles/secretmanager.secretAccessor` on all three.
+The Cloud Run service account (`294613088058-compute@developer.gserviceaccount.com`) must have `roles/secretmanager.secretAccessor` on all five.

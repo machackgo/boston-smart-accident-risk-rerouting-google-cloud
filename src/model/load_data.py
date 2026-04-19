@@ -2,14 +2,17 @@
 load_data.py
 Fetches all crashes from the live API with pagination.
 Caches to data/crashes_cache.parquet to avoid re-hitting the API on every run.
+
+Note: In the Google Cloud version the canonical crash dataset lives in
+data/crashes_cache.parquet (backed up to GCS) and Cloud SQL (boston_crashes table).
+This script is kept for reference but is no longer part of the normal workflow.
 """
 
-import os
 import requests
 import pandas as pd
 from pathlib import Path
 
-BASE_URL = "https://boston-smart-accident-risk-rerouting.onrender.com"
+BASE_URL = "https://boston-accident-risk-api-294613088058.us-central1.run.app"
 CACHE_PATH = Path(__file__).resolve().parents[2] / "data" / "crashes_cache.parquet"
 
 

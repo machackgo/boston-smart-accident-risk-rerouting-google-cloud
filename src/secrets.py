@@ -35,5 +35,5 @@ def get_secret(name: str) -> str:
     if name not in _cache:
         secret_path = f"projects/{_PROJECT_ID}/secrets/{name}/versions/latest"
         response = _get_client().access_secret_version(name=secret_path)
-        _cache[name] = response.payload.data.decode("utf-8")
+        _cache[name] = response.payload.data.decode("utf-8").strip()
     return _cache[name]
