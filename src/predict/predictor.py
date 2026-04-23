@@ -30,8 +30,10 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO_ROOT / "src"))
 
 from predict.feature_builder import build_features, build_segment_features
+from predict import vertex_client
 from live.routes import get_route
 from live.geocoding import reverse_geocode
+from explain.gemini_explainer import get_gemini_explanation
 import re as _re
 
 # ── Load model once at module level ───────────────────────────────────────────
@@ -134,19 +136,49 @@ def predict_route_risk(origin: str, destination: str, departure_time=None) -> di
     # ── Feature assembly (live API calls) ─────────────────────────────────────
     features_df, context = build_features(origin, destination, departure_time)
 
-    # ── Model inference ───────────────────────────────────────────────────────
-    probas     = _MODEL.predict_proba(features_df)[0]   # order matches _CLASSES
-    risk_class = _classify_with_thresholds(probas.reshape(1, -1))[0]
+    # ── Model inference — try Vertex AI, fall back to local ───────────────────
+    inference_source    = "local"
+    vertex_endpoint_id  = None
+    vertex_model_id     = None
+    vertex_latency_ms   = None
 
-    proba_dict    = {cls: round(float(p), 4) for cls, p in zip(_CLASSES, probas)}
-    confidence    = round(float(max(probas)), 4)
+    vertex_envelope = vertex_client.predict_single(features_df.iloc[0].to_dict())
+    if vertex_envelope is not None:
+        inference_source  = "vertex"
+        vertex_endpoint_id = vertex_client._VERTEX_ENDPOINT_ID
+        vertex_model_id   = vertex_envelope["vertex_model_id"]
+        vertex_latency_ms = vertex_envelope["latency_ms"]
+        pred              = vertex_envelope["prediction"]
+        risk_class        = pred["risk_class"]
+        confidence        = pred["confidence"]
+        proba_dict        = pred["probabilities"]
+        print(f"[predictor] inference=vertex latency={vertex_latency_ms}ms model={vertex_model_id}")
+    else:
+        probas     = _MODEL.predict_proba(features_df)[0]
+        risk_class = _classify_with_thresholds(probas.reshape(1, -1))[0]
+        proba_dict = {cls: round(float(p), 4) for cls, p in zip(_CLASSES, probas)}
+        confidence = round(float(max(probas)), 4)
+        _src = "enabled-fallback" if vertex_client.is_enabled() else "disabled"
+        print(f"[predictor] inference=local vertex={_src}")
 
     # ── Extract route summary ─────────────────────────────────────────────────
     route_raw    = context["route_raw"]
     default_leg  = route_raw["default_route"]
     weather_raw  = context["weather_raw"]
 
-    return {
+    # ── Extract spatial features for Gemini context ───────────────────────────
+    _SPATIAL_COLS = [
+        "nearby_crash_count_1km", "nearby_fatal_count_1km",
+        "nearby_injury_count_1km", "nearby_crash_count_500m",
+        "nearby_fatal_count_500m", "nearby_avg_severity_1km",
+    ]
+    spatial_feats = {
+        col: float(features_df[col].iloc[0])
+        for col in _SPATIAL_COLS
+        if col in features_df.columns
+    }
+
+    result = {
         "risk_class": risk_class,
         "confidence": confidence,
         "class_probabilities": proba_dict,
@@ -171,8 +203,17 @@ def predict_route_risk(origin: str, destination: str, departure_time=None) -> di
             "weather_mapping_used":    context["weather_mapping_used"],
             "model_version":           _MODEL_VERSION,
             "spatial_features_active": context.get("spatial_features_active", False),
+            "inference_source":        inference_source,
+            "vertex_endpoint_id":      vertex_endpoint_id,
+            "vertex_model_id":         vertex_model_id,
+            "vertex_latency_ms":       vertex_latency_ms,
         },
     }
+
+    # ── Gemini explanation (non-blocking — None if disabled or fails) ─────────
+    result["explanation"] = get_gemini_explanation({**result, "spatial_features": spatial_feats})
+
+    return result
 
 
 def _sample_leg(leg: dict, num_segments: int) -> tuple[list, list, list]:
@@ -322,9 +363,32 @@ def predict_route_risk_segmented(
         speed_limits_per_point=all_sample_spds,
     )
 
-    # ── 4. Single batch inference ─────────────────────────────────────────────
-    all_probas      = _MODEL.predict_proba(all_features_df)
-    all_predictions = np.array(_classify_with_thresholds(all_probas))
+    # ── 4. Batch inference — try Vertex AI, fall back to local ───────────────
+    inference_source   = "local"
+    vertex_endpoint_id = None
+    vertex_model_id    = None
+    vertex_latency_ms  = None
+    instances          = all_features_df.to_dict(orient="records")
+
+    vertex_envelope = vertex_client.predict_batch(instances)
+    if vertex_envelope is not None:
+        inference_source   = "vertex"
+        vertex_endpoint_id = vertex_client._VERTEX_ENDPOINT_ID
+        vertex_model_id    = vertex_envelope["vertex_model_id"]
+        vertex_latency_ms  = vertex_envelope["latency_ms"]
+        vertex_preds       = vertex_envelope["predictions"]
+        all_predictions    = np.array([r["risk_class"] for r in vertex_preds])
+        # Reconstruct probability matrix from Vertex response (same column order as _CLASSES)
+        all_probas = np.array([
+            [r["probabilities"].get(c, 0.0) for c in _CLASSES]
+            for r in vertex_preds
+        ])
+        print(f"[predictor] segmented inference=vertex rows={len(instances)} latency={vertex_latency_ms}ms")
+    else:
+        all_probas      = _MODEL.predict_proba(all_features_df)
+        all_predictions = np.array(_classify_with_thresholds(all_probas))
+        _src = "enabled-fallback" if vertex_client.is_enabled() else "disabled"
+        print(f"[predictor] segmented inference=local vertex={_src} rows={len(instances)}")
 
     # ── 5. Assemble per-route results ─────────────────────────────────────────
     weather_raw   = feat_ctx["weather_raw"]
@@ -435,6 +499,27 @@ def predict_route_risk_segmented(
     print(f"[predictor] Recommended: route {rec_route_idx} ({best['label']}) "
           f"safety_score={best['safety_score']}")
 
+    # ── Gemini explanation for the recommended route (non-blocking) ───────────
+    print(f"[predictor] Requesting Gemini explanation for route {rec_route_idx} ...")
+    explanation = get_gemini_explanation({
+        "risk_class":          best["overall_risk_class"],
+        "confidence":          best["overall_confidence"],
+        "class_probabilities": best["overall_probabilities"],
+        "weather": {
+            "condition":         weather_raw["condition"],
+            "temperature_f":     weather_raw["temperature_f"],
+            "is_precipitation":  weather_raw["is_precipitation"],
+            "is_low_visibility": weather_raw["is_low_visibility"],
+        },
+        "route": {
+            "duration_minutes": best["duration_minutes"],
+            "distance_miles":   best["distance_miles"],
+        },
+        "context": {"local_hour": feat_ctx["local_hour"]},
+        "hotspots": best.get("hotspots", []),
+    })
+    print(f"[predictor] explanation={'<text>' if explanation else 'None'}")
+
     return {
         "recommended_route_index": rec_route_idx,
         "default_route_index":     0,
@@ -446,15 +531,20 @@ def predict_route_risk_segmented(
             "is_low_visibility": weather_raw["is_low_visibility"],
         },
         "context": {
-            "timezone":              "America/New_York",
-            "local_hour":            feat_ctx["local_hour"],
-            "num_routes_analyzed":   len(route_results),
+            "timezone":               "America/New_York",
+            "local_hour":             feat_ctx["local_hour"],
+            "num_routes_analyzed":    len(route_results),
             "num_segments_per_route": num_segments,
-            "weather_mapping_used":  feat_ctx["weather_mapping_used"],
-            "speed_source":            feat_ctx.get("speed_source", "unknown"),
-            "fallback_speed_mph":      feat_ctx.get("fallback_speed_mph"),
-            "model_version":           _MODEL_VERSION,
+            "weather_mapping_used":   feat_ctx["weather_mapping_used"],
+            "speed_source":           feat_ctx.get("speed_source", "unknown"),
+            "fallback_speed_mph":     feat_ctx.get("fallback_speed_mph"),
+            "model_version":          _MODEL_VERSION,
             "spatial_features_active": feat_ctx.get("spatial_features_active", False),
+            "inference_source":       inference_source,
+            "vertex_endpoint_id":     vertex_endpoint_id,
+            "vertex_model_id":        vertex_model_id,
+            "vertex_latency_ms":      vertex_latency_ms,
         },
         "recommendation_reason": reason,
+        "explanation":           explanation,
     }

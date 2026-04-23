@@ -45,6 +45,30 @@ spec:
         - image: us-central1-docker.pkg.dev/boston-rerouting/boston-risk/boston-accident-risk-api:latest
           ports:
             - containerPort: 8080
+          env:
+            # Phase B3: Vertex AI inference path.
+            # Set VERTEX_ENDPOINT_ID to the full resource name from champion_manifest.json
+            # (e.g. projects/boston-rerouting/locations/us-central1/endpoints/NNNN).
+            # Leave empty ("") to keep all inference on the local model (safe default).
+            - name: VERTEX_ENDPOINT_ID
+              value: "projects/294613088058/locations/us-central1/endpoints/1226299062353920000"
+            - name: VERTEX_TIMEOUT_SECONDS
+              value: "10.0"
+            - name: VERTEX_BATCH_TIMEOUT_SECONDS
+              value: "20.0"
+            - name: VERTEX_PROJECT
+              value: "boston-rerouting"
+            - name: VERTEX_LOCATION
+              value: "us-central1"
+            # Gemini explanation layer — key stored in Secret Manager.
+            # Application restriction: None. API restriction: Generative Language API only.
+            - name: ENABLE_GEMINI_EXPLANATIONS
+              value: "true"
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: gemini-api-key
+                  key: latest
           resources:
             limits:
               cpu: "1"

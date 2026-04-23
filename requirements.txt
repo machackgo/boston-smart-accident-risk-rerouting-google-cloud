@@ -1,5 +1,8 @@
 google-cloud-secret-manager
 google-cloud-storage
+google-cloud-bigquery
+google-cloud-aiplatform
+google-genai
 cloud-sql-python-connector[pg8000]
 sqlalchemy
 fastapi

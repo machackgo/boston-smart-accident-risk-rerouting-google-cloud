@@ -29,6 +29,15 @@ from src.live.routes import get_route
 from src.secrets import get_secret
 from src.database import log_prediction, get_engine
 
+# BigQuery analytics sink — imported lazily so a BQ issue never breaks the API.
+# Cloud SQL remains the primary operational store; BQ is a parallel analytics copy.
+try:
+    from src.bigquery_logger import log_prediction_bq
+    _BQ_ENABLED = True
+except Exception as _bq_import_err:
+    print(f"[bq] Import failed — BigQuery logging disabled: {_bq_import_err}")
+    _BQ_ENABLED = False
+
 # Minimum route thresholds — below these the model's training distribution is not met
 _MIN_DISTANCE_MILES = 0.3
 _MIN_DURATION_MIN   = 2.0
@@ -279,7 +288,7 @@ def predict(request: PredictRequest, background_tasks: BackgroundTasks):
         raise HTTPException(status_code=500, detail=str(e))
 
     elapsed_ms = int((time.monotonic() - t0) * 1000)
-    background_tasks.add_task(log_prediction, {
+    _log_row = {
         "endpoint":               "/predict",
         "origin":                 request.origin,
         "destination":            request.destination,
@@ -304,8 +313,13 @@ def predict(request: PredictRequest, background_tasks: BackgroundTasks):
         "num_hotspots":           None,
         "num_high_hotspots":      None,
         "model_version":          result["context"].get("model_version"),
+        "vertex_endpoint_id":     result["context"].get("vertex_endpoint_id"),
+        "vertex_model_id":        result["context"].get("vertex_model_id"),
         "response_time_ms":       elapsed_ms,
-    })
+    }
+    background_tasks.add_task(log_prediction, _log_row)          # Cloud SQL (primary)
+    if _BQ_ENABLED:
+        background_tasks.add_task(log_prediction_bq, _log_row)   # BigQuery (analytics)
     return result
 
 
@@ -353,7 +367,7 @@ def predict_segmented(request: SegmentedPredictRequest, background_tasks: Backgr
     rec_idx   = result["recommended_route_index"]
     rec_route = result["routes"][rec_idx]
     def_route = result["routes"][result["default_route_index"]]
-    background_tasks.add_task(log_prediction, {
+    _log_row = {
         "endpoint":               "/predict/segmented",
         "origin":                 request.origin,
         "destination":            request.destination,
@@ -378,8 +392,13 @@ def predict_segmented(request: SegmentedPredictRequest, background_tasks: Backgr
         "num_hotspots":           rec_route["num_hotspots"],
         "num_high_hotspots":      rec_route["num_high_hotspots"],
         "model_version":          result["context"].get("model_version"),
+        "vertex_endpoint_id":     result["context"].get("vertex_endpoint_id"),
+        "vertex_model_id":        result["context"].get("vertex_model_id"),
         "response_time_ms":       elapsed_ms,
-    })
+    }
+    background_tasks.add_task(log_prediction, _log_row)          # Cloud SQL (primary)
+    if _BQ_ENABLED:
+        background_tasks.add_task(log_prediction_bq, _log_row)   # BigQuery (analytics)
     return result
 
 
