@@ -1,4 +1,4 @@
-# Boston Smart Accident Risk and Rerouting — Google Cloud
+    # Boston Smart Accident Risk and Rerouting — Google Cloud
 
 Uses historical Boston crash data (MassDOT 2015–2024), live weather, and live Google Maps traffic to estimate accident risk on a driving route and recommend safer alternatives. Deployed on Google Cloud Platform.
 
